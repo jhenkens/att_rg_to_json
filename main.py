@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import sys
 from bs4 import BeautifulSoup
 import json
 import requests
@@ -6,10 +7,30 @@ import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 MODEM_URL = 'http://192.168.1.254/cgi-bin/broadbandstatistics.ha'
-def parse():
+
+
+def parse(mappings=False):
     page = requests.get(MODEM_URL)
 
     soup = BeautifulSoup(page.content, 'html.parser')
+    global_data = {
+        "Summary of the most important WAN information": [
+            "Broadband Connection",
+            "Broadband Network Type",
+            "MTU",
+        ],
+        "IPv4 Table": [
+            "Transmit Packets",
+            "Transmit Errors",
+            "Transmit Discards",
+            "Transmit Bytes",
+            "Receive Packets",
+            "Receive Errors",
+            "Receive Discards",
+            "Receive Bytes",
+            "PTM Receive PDUs",
+        ]
+    }
     line_data = [
         "LineState",
         "DSSync",
@@ -29,86 +50,92 @@ def parse():
         "FEC",
         "CRC",
     ]
-    global_data = [
-        "Transmit Packets",
-        "Transmit Errors",
-        "Transmit Discards",
-        "Transmit Bytes",
-        "Receive Packets",
-        "Receive Errors",
-        "Receive Discards",
-        "Receive Bytes",
-        "PTM Receive PDUs",
-        "Broadband Connection",
-        "Broadband Network Type",
-        "MTU",
-    ]
-
     time_data = [
         "Severely Errored Seconds (SESL)",
         "Unavailable Seconds (UASL)",
         "DSL Initialization Timeouts",
     ]
-    time_keys = []
-    table_keys = []
+    time_keys = {}
+    table_keys = {}
+    results = {}
+    descriptions = {}
+
+    def normalize_key(k):
+        k = k.replace(" ", "_").lower()
+        k = re.sub(r'\([A-Za-z]+\)$','',k)
+        return k.strip('_')
+    
+    def lookup(key):
+        value_element = soup.find("td", {"headers": key})
+        header_element = value_element.parent.find('th')
+        
+        description = f'Line {l} {header_element.text.strip()}'
+        key = normalize_key(description)
+        
+        results[key] = value_element.text.strip()
+        descriptions[key] = description
+        
+    
+    timed_table = soup.find('table', {"summary": "Table of timed statistics"}).find_all("td")
     for l in range(1, 3):
         for d in line_data:
-            table_keys.append("Line" + str(l) + " " + d)
+            lookup(f"Line{l} {d}")
         for d in ["DS", "US"]:
             for k in bi_dir_data:
-                table_keys.append("Line" + str(l) + " " + k + " " + d + str(l))
+                lookup(f"Line{l} {k} {d}{l}")
         for t in time_data:
-            time_keys.append(t + " Line " + str(l))
-
-    results = {}
-    for key in global_data:
-        key_results = soup.find("th", text=key).parent.find('td')
-        results[key] = key_results.text.strip()
-    for key in table_keys:
-        key_results = soup.find("td", {"headers": key})
-        results[key] = key_results.text.strip()
-
-    timed_table = soup.find('table', {"summary": "Table of timed statistics"})
-    for key in time_keys:
-        # line endings are weird for time_keys, do it inefficiently
-        key_results = [f for f in timed_table.findAll("td") if f.text and key in f.text][0]
-        key_result = key_results.parent.findAll('td')[-1]
-        dest_key = re.sub(r"\([A-Z]+\) ", "", key)
-        results[dest_key] = key_result.text.strip()
-
-    def normalize(d):
-        # Replace spaces w/ underscores, lowercase dictionary keys and strip/convert values to integers
-        def normalize_key(k):
-            k = k.replace(" ", "_").lower()
-            k = re.sub(r'(.*)_line_(\d)',r'line\2_\1',k)
-            k = re.sub(r'([du]s)\d$',r'\1',k)
-            return k
-        def normalize_value(v):
-            try:
-                return float(v)
-            except ValueError:
-                return v
+            lookup_key = f"{t} Line {l}"
+            # line endings are weird for time_keys, do it inefficiently
+            header = [f for f in timed_table if f.text and lookup_key in f.text][0]
+            value_element = header.parent.findAll('td')[-1] # total
+            description = re.sub(r"\([A-Z]+\)", "", t).strip()
+            description = f'Line {l} {description}'
             
-        return {normalize_key(k): normalize_value(v) for k, v in d.items()}
+            key = normalize_key(description)
+            results[key] = value_element.text.strip()
+            descriptions[key] = description
+            
+    for table, keys in global_data.items():
+        table = soup.find('table', {"summary": table})
+        for key in keys:
+            value_element = table.find("th", text=key).parent.find('td')
+            description = key
+
+            key = normalize_key(description)
+            results[key] = value_element.text.strip()
+            descriptions[key] = description
+
+    def normalize_value(v):
+        try:
+            return float(v)
+        except ValueError:
+            return v
+
+    results = {k: normalize_value(v) for k,v in results.items()}
+
+    if mappings:
+        return json.dumps(descriptions, indent=2, sort_keys=True)
+    else:
+        return json.dumps(results, indent=2, sort_keys=True)
 
 
-    results = normalize(results)
-
-    results = {k: v for k, v in results.items() if isinstance(v, float)}
-
-    return json.dumps(results, indent=2, sort_keys=True)
-    
 hostName = ''
 serverPort = 8080
 
+
 class MyServer(BaseHTTPRequestHandler):
     def do_GET(self):
+        response = parse()
+        if self.path.endswith('/mappings'):
+            response = parse(mappings=True)
+
         self.send_response(200)
         self.send_header("Content-type", "application/json")
         self.end_headers()
-        self.wfile.write(bytes(parse(), "utf-8"))
+        self.wfile.write(bytes(response, "utf-8"))
 
-if __name__ == "__main__":        
+
+if __name__ == "__main__":
     webServer = HTTPServer((hostName, serverPort), MyServer)
     print("Server started http://%s:%s" % (hostName, serverPort))
 
@@ -119,5 +146,3 @@ if __name__ == "__main__":
 
     webServer.server_close()
     print("Server stopped.")
-    
-
