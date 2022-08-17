@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-import sys
 from bs4 import BeautifulSoup
-import json
-import requests
-import re
+import sys, json, requests, re, os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 MODEM_URL = 'http://192.168.1.254/cgi-bin/broadbandstatistics.ha'
 
 
-def parse(mappings=False):
+def parse(mapping=False):
     page = requests.get(MODEM_URL)
 
     soup = BeautifulSoup(page.content, 'html.parser')
@@ -58,22 +55,45 @@ def parse(mappings=False):
     time_keys = {}
     table_keys = {}
     results = {}
-    descriptions = {}
+    mappings = {}
 
     def normalize_key(k):
         k = k.replace(" ", "_").lower()
         k = re.sub(r'\([A-Za-z]+\)$','',k)
         return k.strip('_')
     
+    def set_value(description, value_element):
+        key = normalize_key(description)
+        value = value_element.text.strip()
+        try:
+            v = float(value)
+        except ValueError:
+            v = value 
+        value = v
+        results[key] = value
+        mappings[key] = {
+            "description": description
+            }
+        if isinstance(v, float):
+            mappings[key]["type"] = "float"
+        
+    
     def lookup(key):
         value_element = soup.find("td", {"headers": key})
         header_element = value_element.parent.find('th')
         
         description = f'Line {l} {header_element.text.strip()}'
-        key = normalize_key(description)
-        
-        results[key] = value_element.text.strip()
-        descriptions[key] = description
+        down_up = re.search(r'([DU]S)\d$', key)
+        if down_up:
+            d1 = description
+            d2 = ''
+            if '(' in description:
+                paren_index = description.index('(')
+                d1 = description[0:paren_index].strip()
+                d2 = description[paren_index:]
+            
+            description = " ".join([d1, down_up.group(1), d2])
+        set_value(description, value_element)
         
     
     timed_table = soup.find('table', {"summary": "Table of timed statistics"}).find_all("td")
@@ -91,9 +111,7 @@ def parse(mappings=False):
             description = re.sub(r"\([A-Z]+\)", "", t).strip()
             description = f'Line {l} {description}'
             
-            key = normalize_key(description)
-            results[key] = value_element.text.strip()
-            descriptions[key] = description
+            set_value(description, value_element)
             
     for table, keys in global_data.items():
         table = soup.find('table', {"summary": table})
@@ -101,20 +119,10 @@ def parse(mappings=False):
             value_element = table.find("th", text=key).parent.find('td')
             description = key
 
-            key = normalize_key(description)
-            results[key] = value_element.text.strip()
-            descriptions[key] = description
+            set_value(description, value_element)
 
-    def normalize_value(v):
-        try:
-            return float(v)
-        except ValueError:
-            return v
-
-    results = {k: normalize_value(v) for k,v in results.items()}
-
-    if mappings:
-        return json.dumps(descriptions, indent=2, sort_keys=True)
+    if mapping:
+        return json.dumps(mappings, indent=2, sort_keys=True)
     else:
         return json.dumps(results, indent=2, sort_keys=True)
 
@@ -127,7 +135,7 @@ class MyServer(BaseHTTPRequestHandler):
     def do_GET(self):
         response = parse()
         if self.path.endswith('/mappings'):
-            response = parse(mappings=True)
+            response = parse(mapping=True)
 
         self.send_response(200)
         self.send_header("Content-type", "application/json")
@@ -136,6 +144,13 @@ class MyServer(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    env_test = os.environ.get("TEST",None)
+    if env_test:
+        if env_test == "TRUE":
+            print(parse())
+        if env_test == "MAPPING":
+            print(parse(mapping=True))
+        sys.exit(0)
     webServer = HTTPServer((hostName, serverPort), MyServer)
     print("Server started http://%s:%s" % (hostName, serverPort))
 
