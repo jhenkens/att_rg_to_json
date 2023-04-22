@@ -144,7 +144,7 @@ class MyServer(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    env_test = os.environ.get("TEST",None)
+    env_test = os.environ.get("TEST", None)
     if env_test:
         if env_test == "TRUE":
             print(parse())
