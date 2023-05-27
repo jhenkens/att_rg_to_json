@@ -82,7 +82,7 @@ def parse(mapping=False):
         value_element = soup.find("td", {"headers": key})
         header_element = value_element.parent.find('th')
         
-        description = f'Line {l} {header_element.text.strip()}'
+        description = f'{result_prefix}{header_element.text.strip()}'
         down_up = re.search(r'([DU]S)\d$', key)
         if down_up:
             d1 = description
@@ -97,19 +97,27 @@ def parse(mapping=False):
         
     
     timed_table = soup.find('table', {"summary": "Table of timed statistics"}).find_all("td")
-    for l in range(1, 3):
+    multi_line = soup.find("td", {"headers": f"Line2 LineState"}) is not None
+    
+    lines = [["","Line1 ", 1]]
+    if multi_line:
+        lines = [
+            [" Line1 ", "Line 1 ", 1],
+            [" Line2 ", "Line 2 ", 2],
+        ]
+    for prefix, result_prefix, line in lines:
         for d in line_data:
-            lookup(f"Line{l} {d}")
+            lookup(f"{prefix}{d}".strip())
         for d in ["DS", "US"]:
             for k in bi_dir_data:
-                lookup(f"Line{l} {k} {d}{l}")
+                lookup(f"{prefix}{k} {d}{line}".strip())
         for t in time_data:
-            lookup_key = f"{t} Line {l}"
+            lookup_key = f"{t}{prefix}".strip()
             # line endings are weird for time_keys, do it inefficiently
             header = [f for f in timed_table if f.text and lookup_key in f.text][0]
             value_element = header.parent.findAll('td')[-1] # total
             description = re.sub(r"\([A-Z]+\)", "", t).strip()
-            description = f'Line {l} {description}'
+            description = f'Line {line} {description}'
             
             set_value(description, value_element)
             
