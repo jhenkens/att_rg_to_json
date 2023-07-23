@@ -49,6 +49,7 @@ def parse(mapping=False):
             ],
         },
     }
+
     line_data = [
         "LineState",
         "DSSync",
@@ -157,7 +158,7 @@ def parse(mapping=False):
             continue
         table = tables[0]
         for key in keys:
-            th = table.find("th", text=key)
+            th = table.find("th", string=key)
             if not th:
                 continue
             value_element = th.parent.find("td")
