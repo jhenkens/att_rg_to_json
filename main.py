@@ -2,6 +2,7 @@
 from bs4 import BeautifulSoup
 import sys, json, requests, re, os
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import warnings
 
 MODEM_URL = "http://192.168.1.254/cgi-bin/broadbandstatistics.ha"
 
@@ -70,12 +71,11 @@ def parse(mapping=False):
         "CRC",
     ]
     time_data = [
+        "Errored Seconds (ES)",
         "Severely Errored Seconds (SESL)",
         "Unavailable Seconds (UASL)",
         "DSL Initialization Timeouts",
     ]
-    time_keys = {}
-    table_keys = {}
     results = {}
     mappings = {}
 
@@ -97,15 +97,27 @@ def parse(mapping=False):
         if isinstance(v, float):
             mappings[key]["type"] = "float"
 
-    def lookup(key):
-        value_element = soup.find("td", {"headers": key})
+    def lookup(key, result_prefix):
+        def test_key(td):
+            if not td.attrs:
+                return False
+            if not 'headers' in td.attrs:
+                return False
+            headers = td.attrs['headers']
+            if isinstance(headers, list):
+                headers = " ".join(headers)
+            return re.match(key, headers)
+        value_element = [td for td in soup.find_all("td") if test_key(td)]
+        value_element = value_element[0] if value_element else None
         if not value_element:
+            print(f"Failed to find {key}")
             return
         header_element = value_element.parent.find("th")
         if not header_element:
+            print(f"Failed to find {key}")
             return
 
-        description = f"{result_prefix}{header_element.text.strip()}"
+        description = f"{result_prefix} {header_element.text.strip()}"
         down_up = re.search(r"([DU]S)\d$", key)
         if down_up:
             d1 = description
@@ -125,27 +137,36 @@ def parse(mapping=False):
         timed_table = []
     multi_line = soup.find("td", {"headers": f"Line2 LineState"}) is not None
 
-    lines = [["", "Line1 ", 1]]
+    lines = [1]
     if multi_line:
-        lines = [
-            [" Line1 ", "Line 1 ", 1],
-            [" Line2 ", "Line 2 ", 2],
-        ]
-    for prefix, result_prefix, line in lines:
-        for d in line_data:
-            lookup(f"{prefix}{d}".strip())
-        for d in ["DS", "US"]:
-            for k in bi_dir_data:
-                lookup(f"{prefix}{k} {d}{line}".strip())
-        for t in time_data:
-            lookup_key = f"{t}{prefix}".strip()
+        lines = [1,2]
+        
+    for line_number in lines:
+        result_prefix = f"Line {line_number}"
+        
+        line_regex = f"Line{line_number}"
+        if not multi_line:
+            line_regex = ""
+
+        for key in line_data:
+            lookup(rf"^\s*{line_regex}\s*{key}\s*$", result_prefix)
+        
+        for direction in ["DS", "US"]:
+            for key in bi_dir_data:
+                lookup(rf"^\s*{line_regex}\s*{key}\s*{direction}\s*{line_number}\s*$", result_prefix)
+        
+        for key in time_data:
+            key = key.replace(' ', r"\s")
+            key = key.replace('(', r'\(')
+            key = key.replace(')', r'\)')
+            lookup_key = rf"^\s*{key}\s*Line\s*{line_number}\s*$"
             # line endings are weird for time_keys, do it inefficiently
-            headers = [f for f in timed_table if f.text and lookup_key in f.text]
+            headers = [f for f in timed_table if f.text and re.match(lookup_key, f.text)]
             if headers:
                 header = headers[0]
                 value_element = header.parent.findAll("td")[-1]  # total
-                description = re.sub(r"\([A-Z]+\)", "", t).strip()
-                description = f"Line {line} {description}"
+                description = re.sub(r"\([A-Z]+\)\s*line\s*\d", "", header.text, flags=re.IGNORECASE ).strip()
+                description = f"Line {line_number} {description}"
 
                 set_value(description, value_element)
 
@@ -158,7 +179,9 @@ def parse(mapping=False):
             continue
         table = tables[0]
         for key in keys:
-            th = table.find("th", string=key)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore",category=DeprecationWarning)
+                th = table.find("th", string=key)
             if not th:
                 continue
             value_element = th.parent.find("td")
