@@ -81,10 +81,11 @@ def parse(mapping=False):
 
     def normalize_key(k):
         k = k.replace(" ", "_").lower()
-        k = re.sub(r"\([A-Za-z]+\)$", "", k)
+        k = re.sub(r"\([A-Za-z]+\)[_]*", "", k)
         return k.strip("_")
 
     def set_value(description, value_element):
+        description = re.sub(r"\s+", " ", description)
         key = normalize_key(description)
         value = value_element.text.strip()
         try:
@@ -97,28 +98,32 @@ def parse(mapping=False):
         if isinstance(v, float):
             mappings[key]["type"] = "float"
 
-    def lookup(key, result_prefix):
-        def test_key(td):
+    def lookup(key, result_prefix, suffix=None):
+        def join_headers(td):
             if not td.attrs:
-                return False
+                return None
             if not 'headers' in td.attrs:
-                return False
+                return None
             headers = td.attrs['headers']
             if isinstance(headers, list):
                 headers = " ".join(headers)
-            return re.match(key, headers)
+            return headers
+            
+        def test_key(td):
+            headers = join_headers(td)
+            return headers and re.match(key, headers)
         value_element = [td for td in soup.find_all("td") if test_key(td)]
         value_element = value_element[0] if value_element else None
         if not value_element:
-            print(f"Failed to find {key}")
             return
         header_element = value_element.parent.find("th")
         if not header_element:
-            print(f"Failed to find {key}")
             return
+        
+        key_text = join_headers(value_element)
 
         description = f"{result_prefix} {header_element.text.strip()}"
-        down_up = re.search(r"([DU]S)\d$", key)
+        down_up = re.search(r"([DU]S)\d$", key_text)
         if down_up:
             d1 = description
             d2 = ""
@@ -128,6 +133,8 @@ def parse(mapping=False):
                 d2 = description[paren_index:]
 
             description = " ".join([d1, down_up.group(1), d2])
+        if suffix:
+            description = description.strip() + " " + suffix
         set_value(description, value_element)
 
     timed_table = soup.find("table", {"summary": "Table of timed statistics"})
@@ -153,7 +160,10 @@ def parse(mapping=False):
         
         for direction in ["DS", "US"]:
             for key in bi_dir_data:
-                lookup(rf"^\s*{line_regex}\s*{key}\s*{direction}\s*{line_number}\s*$", result_prefix)
+                suffix = None
+                if "seconds" in key.lower():
+                    suffix = "Current Day"
+                lookup(rf"^\s*{line_regex}\s*{key}\s*{direction}\s*{line_number}\s*$", result_prefix, suffix=suffix)
         
         for key in time_data:
             key = key.replace(' ', r"\s")
@@ -165,7 +175,7 @@ def parse(mapping=False):
             if headers:
                 header = headers[0]
                 value_element = header.parent.findAll("td")[-1]  # total
-                description = re.sub(r"\([A-Z]+\)\s*line\s*\d", "", header.text, flags=re.IGNORECASE ).strip()
+                description = re.sub(r"\([A-Z]+\)?\s*line\s*\d$", "", header.text, flags=re.IGNORECASE ).strip()
                 description = f"Line {line_number} {description}"
 
                 set_value(description, value_element)
