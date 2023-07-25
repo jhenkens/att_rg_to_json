@@ -114,8 +114,8 @@ def convert(raw):
                 name = entry_name
 
                 cat = parse_cat(value)
-                entry_name, unit = parse_unit(entry_name)
-                name, id = build_name_and_id(entry_name, table_name, cat, line)
+                name, unit = parse_unit(name)
+                name, id = build_name_and_id(name, table_name, cat, line)
 
                 result["name"] = name
                 result["id"] = id
