@@ -4,11 +4,11 @@ import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import time
 
-from gather_data_legacy import parse
-
 from gather_data import parse_all
 from convert_data import convert
 from build_homeassistant_sensors import build_homeassistant_rest_sensor_template, build_home_assistant_data_response
+
+DEBUG = os.environ.get("DEBUG","").lower() == "true"
 
 hostName = ""
 serverPort = 8080
@@ -17,18 +17,9 @@ if os.environ.get("USE_HOSTNAME","").lower() == "true":
     import socket
     serverAddr = f"http://{socket.gethostname()}:{serverPort}"
 
-class LegacyServer(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path.endswith("/mappings"):
-            response = parse(mapping=True)
-        else:
-            response = parse()
-
-        self.send_response(200)
-        self.send_header("Content-type", "application/json")
-        self.end_headers()
-        self.wfile.write(bytes(response, "utf-8"))
-
+def dprint(*args):
+    if DEBUG:
+        print(*args)
 
 cached_value = None
 cached_datetime = 0
@@ -60,6 +51,11 @@ class Server(BaseHTTPRequestHandler):
         self.send_header("Content-type", content_type)
         self.end_headers()
         self.wfile.write(bytes(body, "utf-8"))
+        
+    def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
+        if DEBUG or isinstance(code, int) and code > 299:
+            return super().log_request(code, size)
+        return None
 
     
     def do_GET(self):
@@ -82,29 +78,16 @@ class Server(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    mode = os.environ.get("MODE", None)
-    if mode:
-        if mode == "SERVER":
-            webServer = HTTPServer((hostName, serverPort), LegacyServer)
-            print("Server started http://%s:%s" % (hostName, serverPort))
-
-            try:
-                webServer.serve_forever()
-            except KeyboardInterrupt:
-                pass
-            webServer.server_close()
-            print("Server stopped.")
-        elif mode.lower() == "server_v2":
-            webServer = HTTPServer((hostName, serverPort), Server)
-            print("Server started http://%s:%s" % (hostName, serverPort))
-
-            try:
-                webServer.serve_forever()
-            except KeyboardInterrupt:
-                pass
-            webServer.server_close()
-            print("Server stopped.")
-        elif mode == "MAPPING":
-            print(parse(mapping=True))
+    mode = os.environ.get("MODE", "").lower()
+    if mode == "once":
+        print(json.dumps(get_raw()))
     else:
-        print(parse())
+        webServer = HTTPServer((hostName, serverPort), Server)
+        dprint("Server started http://%s:%s" % (hostName, serverPort))
+
+        try:
+            webServer.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        webServer.server_close()
+        dprint("Server stopped.")
