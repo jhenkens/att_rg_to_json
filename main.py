@@ -12,6 +12,10 @@ from build_homeassistant_sensors import build_homeassistant_rest_sensor_template
 
 hostName = ""
 serverPort = 8080
+server_addr = None
+if os.environ.get("USE_HOSTNAME","").lower() == "true":
+    import socket
+    server_addr = f"http://{socket.gethostname()}"
 
 class LegacyServer(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -60,14 +64,19 @@ class Server(BaseHTTPRequestHandler):
     
     def do_GET(self):
         if self.path == "/template":
-            server_addr = f"http://{self.headers['HOST']}"
-            self._build_response(build_homeassistant_rest_sensor_template(convert(get_raw()), server_addr), is_json=False)
+            global server_addr
+            _server_addr = server_addr
+            if not _server_addr:
+                _server_addr = f"http://{self.headers['HOST']}"
+            self._build_response(build_homeassistant_rest_sensor_template(convert(get_raw()), _server_addr), is_json=False)
         elif self.path == "/raw":
             self._build_response(get_raw())
         elif self.path == "/ha":
             self._build_response(build_home_assistant_data_response(convert(get_raw())))
         elif self.path == "/":
             self._build_response(convert(get_raw()))
+        elif self.path == "/healthcheck":
+            self._build_response({"healthcheck": "okay"})
         else:
             self._build_response(False)
 
