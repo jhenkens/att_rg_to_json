@@ -32,7 +32,7 @@ def _a(a):
 
 
 def get_tables_from_soup():
-    page = requests.get(MODEM_URL)
+    page = requests.get(MODEM_URL, timeout=10)
     soup = BeautifulSoup(page.content, "html.parser")
     tables = soup.find_all("table")
     return tables

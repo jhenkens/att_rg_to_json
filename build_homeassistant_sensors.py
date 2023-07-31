@@ -1,11 +1,9 @@
-server_addr = "http://attrg2json:8080"
-
 def build_home_assistant_data_response(converted_data):
     result = {x["id"]: x["value"] for x in converted_data}
     sorted_keys = sorted(result.keys())
     return {k: result[k] for k in sorted_keys}
 
-def build_homeassistant_rest_sensor_template(converted_data):
+def build_homeassistant_rest_sensor_template(converted_data, server_addr):
     sensors = "\n".join([sensor_data(n) for n in converted_data])
     return f"""
 rest:

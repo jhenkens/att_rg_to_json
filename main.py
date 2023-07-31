@@ -60,7 +60,8 @@ class Server(BaseHTTPRequestHandler):
     
     def do_GET(self):
         if self.path == "/template":
-            self._build_response(build_homeassistant_rest_sensor_template(convert(get_raw())), is_json=False)
+            server_addr = f"http://{self.headers['HOST']}"
+            self._build_response(build_homeassistant_rest_sensor_template(convert(get_raw()), server_addr), is_json=False)
         elif self.path == "/raw":
             self._build_response(get_raw())
         elif self.path == "/ha":
